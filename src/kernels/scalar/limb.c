@@ -1391,17 +1391,25 @@ void mtx_limb_sqrt(mtx_limb *root, const mtx_limb *num, size_t count)
     if (count % 2 == 0) {
         double top_val = (double)num[count - 1U] * 18446744073709551616.0 + (double)num[count - 2U];
         double r_est = sqrt(top_val);
-        root[top_limb_idx] = (mtx_limb)r_est;
+        uint64_t u_est = (uint64_t)r_est;
+        root[top_limb_idx] = u_est;
     } else {
-        double top_val = (double)num[count - 1U];
+        double top_val = (double)num[count - 1U] * 18446744073709551616.0;
+        if (count >= 2U) {
+            top_val += (double)num[count - 2U];
+        }
         double r_est = sqrt(top_val);
-        root[top_limb_idx] = (mtx_limb)r_est;
+        uint64_t u_est = (uint64_t)r_est;
+        root[top_limb_idx] = u_est >> 32U;
+        if (top_limb_idx >= 1U) {
+            root[top_limb_idx - 1U] = u_est << 32U;
+        }
     }
     if (root[top_limb_idx] == 0U) {
         root[top_limb_idx] = 1U;
     }
 
-    /* Newton iterations */
+    /* Newton iterations: doubles precision from 53 bits each step */
     mtx_limb stack_buf[256];
     mtx_limb *q_buf = stack_buf;
     mtx_limb *rem_buf = stack_buf + (count + 2U);
@@ -1412,7 +1420,7 @@ void mtx_limb_sqrt(mtx_limb *root, const mtx_limb *num, size_t count)
         rem_buf = q_buf + (count + 2U);
     }
 
-    int iters = 6;
+    int iters = (root_len <= 2U) ? 2 : ((root_len <= 4U) ? 3 : ((root_len <= 8U) ? 4 : 5));
     for (int iter = 0; iter < iters; ++iter) {
         size_t cur_root_len = root_len;
         while (cur_root_len > 0U && root[cur_root_len - 1U] == 0U) {
@@ -1423,12 +1431,23 @@ void mtx_limb_sqrt(mtx_limb *root, const mtx_limb *num, size_t count)
         memset(q_buf, 0, (count + 2U) * sizeof(mtx_limb));
         mtx_limb_div_qr(q_buf, rem_buf, num, count, root, cur_root_len);
 
+        /* Check if root == q_buf (exact convergence) */
+        bool converged = true;
+        for (size_t i = 0U; i < root_len; ++i) {
+            if (root[i] != q_buf[i]) {
+                converged = false;
+                break;
+            }
+        }
+
         /* root = (root + q_buf) / 2 */
         mtx_limb carry = mtx_limb_add_n(root, root, q_buf, root_len);
         mtx_limb_rshift(root, root, root_len, 1U);
         if (carry != 0U) {
             root[root_len - 1U] |= (UINT64_C(1) << 63U);
         }
+
+        if (converged) break;
     }
 
     if (q_buf != stack_buf) free(q_buf);

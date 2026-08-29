@@ -479,7 +479,9 @@ static PyObject *MantixFloat_richcompare(PyObject *v, PyObject *w, int op)
 static PyObject *MantixFloat_repr(MantixFloatObject *self)
 {
     double d = mtx_get_f64(&self->val, MTX_ROUND_TO_NEAREST_EVEN);
-    return PyUnicode_FromFormat("MantixFloat(%g, prec=%zu)", d, self->val.precision);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%.17g", d);
+    return PyUnicode_FromFormat("MantixFloat(%s, prec=%zu)", buf, self->val.precision);
 }
 
 static PyObject *MantixFloat_str(MantixFloatObject *self)

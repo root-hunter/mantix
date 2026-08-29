@@ -668,6 +668,41 @@ mtx_status mtx_add(mtx_float *r, const mtx_float *a, const mtx_float *b,
 
     /* Equal exponent fast path */
     if (a->exponent == b->exponent && a->negative == b->negative) {
+        if (a->used == 1U && b->used == 1U) {
+            mtx_limb sum = a->limbs[0] + b->limbs[0];
+            mtx_limb carry = (mtx_limb)(sum < a->limbs[0]);
+            if (carry == 0U) {
+                unsigned tz = (unsigned)__builtin_ctzll(sum);
+                r->limbs[0] = sum >> tz;
+                r->used = 1U;
+                r->exponent = a->exponent + (int64_t)tz;
+                r->negative = a->negative;
+                return MTX_OK;
+            }
+        }
+        if (a->used == 2U && b->used == 2U) {
+            mtx_limb r0 = a->limbs[0] + b->limbs[0];
+            mtx_limb c0 = (mtx_limb)(r0 < a->limbs[0]);
+            mtx_limb r1 = a->limbs[1] + b->limbs[1] + c0;
+            mtx_limb c1 = (mtx_limb)(r1 < a->limbs[1] || (c0 && r1 == a->limbs[1]));
+            if (c1 == 0U) {
+                unsigned tz = (unsigned)__builtin_ctzll(r0);
+                if (tz > 0U) {
+                    r->limbs[0] = (r0 >> tz) | (r1 << (64U - tz));
+                    r->limbs[1] = r1 >> tz;
+                    r->used = (r->limbs[1] != 0U) ? 2U : 1U;
+                    r->exponent = a->exponent + (int64_t)tz;
+                } else {
+                    r->limbs[0] = r0;
+                    r->limbs[1] = r1;
+                    r->used = 2U;
+                    r->exponent = a->exponent;
+                }
+                r->negative = a->negative;
+                return MTX_OK;
+            }
+        }
+
         size_t count = a->used > b->used ? a->used : b->used;
         mtx_limb stack_r[66];
         mtx_limb *res = stack_r;
@@ -835,6 +870,25 @@ mtx_status mtx_div(mtx_float *r, const mtx_float *a, const mtx_float *b,
 
     bool res_negative = (a->negative != b->negative);
 
+    /* Single limb fast path */
+    if (a->used == 1U && b->used == 1U && r->precision <= 64U) {
+        mtx_limb num = a->limbs[0];
+        mtx_limb den = b->limbs[0];
+#if defined(__SIZEOF_INT128__)
+        unsigned shift = 64U + (unsigned)__builtin_clzll(num);
+        __uint128_t scaled = (__uint128_t)num << shift;
+        __uint128_t q_128 = scaled / den;
+        __uint128_t rem = scaled % den;
+        mtx_limb q_limbs[2];
+        q_limbs[0] = (mtx_limb)q_128;
+        q_limbs[1] = (mtx_limb)(q_128 >> 64U);
+        size_t q_used = (q_limbs[1] != 0U) ? 2U : 1U;
+        if (rem != 0U) q_limbs[0] |= 1U;
+        int64_t exp = a->exponent - b->exponent - (int64_t)shift;
+        return mtx_round_and_canonicalize(r, q_limbs, q_used, exp, res_negative, rnd);
+#endif
+    }
+
     /* We need (r->precision + 64) bits of quotient */
     size_t target_prec = r->precision + 64U;
     size_t q_limbs = (target_prec + 63U) / 64U;
@@ -901,6 +955,18 @@ mtx_status mtx_sqrt(mtx_float *r, const mtx_float *a, mtx_rounding rnd)
     if (mtx_is_zero(a)) {
         mtx_set_zero(r);
         return MTX_OK;
+    }
+
+    /* Fast path for single limb / standard precision */
+    if (a->used == 1U && r->precision <= 53U) {
+        double d = (double)a->limbs[0];
+        int64_t exp = a->exponent;
+        if (exp % 2 != 0) {
+            d *= 2.0;
+            --exp;
+        }
+        double res = sqrt(d);
+        return mtx_set_f64(r, ldexp(res, (int)(exp / 2)));
     }
 
     size_t target_prec = r->precision + 64U;
