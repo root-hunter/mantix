@@ -70,3 +70,24 @@ def test_high_precision():
     c = a * b
     assert c.precision == 256
     assert c > 0
+
+def test_division_and_sqrt():
+    a = Float(10.0)
+    b = Float(2.0)
+    assert float(a / b) == 5.0
+    assert float(a / 4.0) == 2.5
+
+    # In-place division
+    x = Float(20.0)
+    x /= 4.0
+    assert float(x) == 5.0
+
+    # Division by zero
+    with pytest.raises(ZeroDivisionError):
+        _ = a / 0.0
+
+    # Square root
+    s = mantix.sqrt(Float(16.0))
+    assert float(s) == 4.0
+    assert abs(float(Float(2.0).sqrt()) - 1.4142135623730951) < 1e-14
+

@@ -67,6 +67,20 @@ mtx_limb mtx_limb_rshift(mtx_limb *result, const mtx_limb *src,
  */
 int mtx_limb_cmp_n(const mtx_limb *left, const mtx_limb *right, size_t count);
 
+/*
+ * Divide dividend (d_count limbs) by divisor (v_count limbs).
+ * Writes quotient (d_count - v_count + 1 limbs) and remainder (v_count limbs).
+ */
+void mtx_limb_div_qr(mtx_limb *quotient, mtx_limb *remainder,
+                     const mtx_limb *dividend, size_t d_count,
+                     const mtx_limb *divisor, size_t v_count);
+
+/*
+ * Multi-limb integer square root: root = floor(sqrt(num)).
+ * num has count limbs, root has (count + 1) / 2 limbs.
+ */
+void mtx_limb_sqrt(mtx_limb *root, const mtx_limb *num, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

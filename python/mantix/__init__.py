@@ -10,6 +10,7 @@ from mantix._core import (
     ROUND_TOWARD_NEGATIVE,
     fma,
     dot,
+    sqrt,
 )
 
 __version__ = "0.1.0"
@@ -19,6 +20,7 @@ __all__ = [
     "f64",
     "fma",
     "dot",
+    "sqrt",
     "ROUND_NEAREST_EVEN",
     "ROUND_TOWARD_ZERO",
     "ROUND_TOWARD_POSITIVE",

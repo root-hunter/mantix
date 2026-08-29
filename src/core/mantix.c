@@ -819,6 +819,141 @@ double mtx_get_f64(const mtx_float *x, mtx_rounding rnd)
     return val;
 }
 
+mtx_status mtx_div(mtx_float *r, const mtx_float *a, const mtx_float *b,
+                   mtx_rounding rnd)
+{
+    if (__builtin_expect(r == NULL || a == NULL || b == NULL || r->precision == 0U, 0)) {
+        return MTX_ERROR_INVALID_ARGUMENT;
+    }
+    if (mtx_is_zero(b)) {
+        return MTX_ERROR_DIVISION_BY_ZERO;
+    }
+    if (mtx_is_zero(a)) {
+        mtx_set_zero(r);
+        return MTX_OK;
+    }
+
+    bool res_negative = (a->negative != b->negative);
+
+    /* We need (r->precision + 64) bits of quotient */
+    size_t target_prec = r->precision + 64U;
+    size_t q_limbs = (target_prec + 63U) / 64U;
+    size_t d_count = b->used + q_limbs;
+
+    mtx_limb stack_buf[256];
+    size_t total_needed = (d_count + 1U) + (q_limbs + 1U) + (b->used + 1U);
+    mtx_limb *buf = stack_buf;
+    if (total_needed > sizeof(stack_buf) / sizeof(stack_buf[0])) {
+        buf = malloc(total_needed * sizeof(mtx_limb));
+        if (buf == NULL) return MTX_ERROR_OUT_OF_MEMORY;
+    }
+
+    mtx_limb *dividend = buf;
+    mtx_limb *quotient = buf + (d_count + 1U);
+    mtx_limb *remainder = quotient + (q_limbs + 1U);
+
+    memset(dividend, 0, (d_count + 1U) * sizeof(mtx_limb));
+    memset(quotient, 0, (q_limbs + 1U) * sizeof(mtx_limb));
+    memset(remainder, 0, (b->used + 1U) * sizeof(mtx_limb));
+
+    /* Put a->limbs at top of dividend, shifted by q_limbs * 64 bits */
+    memcpy(dividend + q_limbs, a->limbs, a->used * sizeof(mtx_limb));
+
+    mtx_limb_div_qr(quotient, remainder, dividend, d_count, b->limbs, b->used);
+
+    /* Check if remainder is non-zero (sticky bit) */
+    bool rem_nonzero = false;
+    for (size_t i = 0U; i < b->used; ++i) {
+        if (remainder[i] != 0U) {
+            rem_nonzero = true;
+            break;
+        }
+    }
+
+    size_t q_used = q_limbs + 1U;
+    while (q_used > 0U && quotient[q_used - 1U] == 0U) {
+        --q_used;
+    }
+
+    int64_t exp = a->exponent - b->exponent - (int64_t)(q_limbs * 64U);
+
+    if (rem_nonzero && q_used > 0U) {
+        /* Set sticky bit in lowest bit of quotient if not already set */
+        quotient[0] |= 1U;
+    }
+
+    mtx_status status = mtx_round_and_canonicalize(r, quotient, q_used, exp, res_negative, rnd);
+
+    if (buf != stack_buf) {
+        free(buf);
+    }
+    return status;
+}
+
+mtx_status mtx_sqrt(mtx_float *r, const mtx_float *a, mtx_rounding rnd)
+{
+    if (__builtin_expect(r == NULL || a == NULL || r->precision == 0U, 0)) {
+        return MTX_ERROR_INVALID_ARGUMENT;
+    }
+    if (a->negative && !mtx_is_zero(a)) {
+        return MTX_ERROR_INVALID_ARGUMENT;
+    }
+    if (mtx_is_zero(a)) {
+        mtx_set_zero(r);
+        return MTX_OK;
+    }
+
+    size_t target_prec = r->precision + 64U;
+    size_t target_limbs = (target_prec + 63U) / 64U;
+
+    /* Make sure exponent is even */
+    int64_t exp = a->exponent;
+    size_t exp_adjust = 0U;
+    if (exp % 2 != 0) {
+        --exp;
+        exp_adjust = 1U;
+    }
+    int64_t res_exp = (exp - (int64_t)(target_limbs * 2U * 64U)) / 2;
+
+    size_t num_limbs = target_limbs * 2U + a->used + 2U;
+    mtx_limb stack_buf[256];
+    mtx_limb *buf = stack_buf;
+    if (num_limbs * 2U > sizeof(stack_buf) / sizeof(stack_buf[0])) {
+        buf = malloc(num_limbs * 2U * sizeof(mtx_limb));
+        if (buf == NULL) return MTX_ERROR_OUT_OF_MEMORY;
+    }
+
+    mtx_limb *num = buf;
+    mtx_limb *root = buf + num_limbs;
+    memset(num, 0, num_limbs * sizeof(mtx_limb));
+    memset(root, 0, num_limbs * sizeof(mtx_limb));
+
+    size_t shift_limbs = target_limbs * 2U;
+    if (exp_adjust == 0U) {
+        memcpy(num + shift_limbs, a->limbs, a->used * sizeof(mtx_limb));
+    } else {
+        mtx_limb carry = mtx_limb_lshift(num + shift_limbs, a->limbs, a->used, 1U);
+        num[shift_limbs + a->used] = carry;
+    }
+
+    size_t total_count = shift_limbs + a->used + 1U;
+    while (total_count > 0U && num[total_count - 1U] == 0U) {
+        --total_count;
+    }
+
+    mtx_limb_sqrt(root, num, total_count);
+
+    size_t root_used = (total_count + 1U) / 2U;
+    while (root_used > 0U && root[root_used - 1U] == 0U) {
+        --root_used;
+    }
+
+    mtx_status status = mtx_round_and_canonicalize(r, root, root_used, res_exp, false, rnd);
+
+    if (buf != stack_buf) free(buf);
+    return status;
+}
+
 double mtx_get_d(const mtx_float *x, mtx_rounding rnd)
 {
     return mtx_get_f64(x, rnd);
@@ -840,6 +975,8 @@ const char *mtx_status_string(mtx_status status)
         return "out of memory";
     case MTX_ERROR_EXPONENT_OVERFLOW:
         return "exponent overflow";
+    case MTX_ERROR_DIVISION_BY_ZERO:
+        return "division by zero";
     default:
         return "unknown error";
     }

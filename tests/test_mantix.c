@@ -1,6 +1,7 @@
 #include "mantix/mantix.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -265,6 +266,72 @@ static void test_aliasing(void)
     mtx_clear(&a);
 }
 
+static void test_division(void)
+{
+    mtx_float a, b, r;
+    assert(mtx_init(&a, 128U) == MTX_OK);
+    assert(mtx_init(&b, 128U) == MTX_OK);
+    assert(mtx_init(&r, 128U) == MTX_OK);
+
+    /* 6.0 / 2.0 = 3.0 */
+    mtx_set_f64(&a, 6.0);
+    mtx_set_f64(&b, 2.0);
+    assert(mtx_div(&r, &a, &b, MTX_ROUND_TO_NEAREST_EVEN) == MTX_OK);
+    assert(mtx_get_f64(&r, MTX_ROUND_TO_NEAREST_EVEN) == 3.0);
+
+    /* 1.0 / 4.0 = 0.25 */
+    mtx_set_f64(&a, 1.0);
+    mtx_set_f64(&b, 4.0);
+    assert(mtx_div(&r, &a, &b, MTX_ROUND_TO_NEAREST_EVEN) == MTX_OK);
+    assert(mtx_get_f64(&r, MTX_ROUND_TO_NEAREST_EVEN) == 0.25);
+
+    /* Division by zero */
+    mtx_set_zero(&b);
+    assert(mtx_div(&r, &a, &b, MTX_ROUND_TO_NEAREST_EVEN) == MTX_ERROR_DIVISION_BY_ZERO);
+
+    /* 0.0 / 5.0 = 0.0 */
+    mtx_set_zero(&a);
+    mtx_set_f64(&b, 5.0);
+    assert(mtx_div(&r, &a, &b, MTX_ROUND_TO_NEAREST_EVEN) == MTX_OK);
+    assert(mtx_is_zero(&r));
+
+    /* In-place division: a = 20.0, a = a / 4.0 -> 5.0 */
+    mtx_set_f64(&a, 20.0);
+    mtx_set_f64(&b, 4.0);
+    assert(mtx_div(&a, &a, &b, MTX_ROUND_TO_NEAREST_EVEN) == MTX_OK);
+    assert(mtx_get_f64(&a, MTX_ROUND_TO_NEAREST_EVEN) == 5.0);
+
+    mtx_clear(&r);
+    mtx_clear(&b);
+    mtx_clear(&a);
+}
+
+static void test_sqrt(void)
+{
+    mtx_float a, r;
+    assert(mtx_init(&a, 128U) == MTX_OK);
+    assert(mtx_init(&r, 128U) == MTX_OK);
+
+    /* sqrt(4.0) = 2.0 */
+    mtx_set_f64(&a, 4.0);
+    assert(mtx_sqrt(&r, &a, MTX_ROUND_TO_NEAREST_EVEN) == MTX_OK);
+    assert(mtx_get_f64(&r, MTX_ROUND_TO_NEAREST_EVEN) == 2.0);
+
+    /* sqrt(2.0) approx 1.4142135623730951 */
+    mtx_set_f64(&a, 2.0);
+    assert(mtx_sqrt(&r, &a, MTX_ROUND_TO_NEAREST_EVEN) == MTX_OK);
+    double val = mtx_get_f64(&r, MTX_ROUND_TO_NEAREST_EVEN);
+    assert(fabs(val - 1.4142135623730951) < 1e-14);
+
+    /* sqrt(0.0) = 0.0 */
+    mtx_set_zero(&a);
+    assert(mtx_sqrt(&r, &a, MTX_ROUND_TO_NEAREST_EVEN) == MTX_OK);
+    assert(mtx_is_zero(&r));
+
+    mtx_clear(&r);
+    mtx_clear(&a);
+}
+
 int main(void)
 {
     test_initialization();
@@ -278,5 +345,7 @@ int main(void)
     test_floating_arithmetic_basic();
     test_floating_rounding_modes();
     test_aliasing();
+    test_division();
+    test_sqrt();
     return 0;
 }

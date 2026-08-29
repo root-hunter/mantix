@@ -28,7 +28,8 @@ typedef enum mtx_status {
     MTX_OK = 0,
     MTX_ERROR_INVALID_ARGUMENT,
     MTX_ERROR_OUT_OF_MEMORY,
-    MTX_ERROR_EXPONENT_OVERFLOW
+    MTX_ERROR_EXPONENT_OVERFLOW,
+    MTX_ERROR_DIVISION_BY_ZERO
 } mtx_status;
 
 typedef enum mtx_rounding {
@@ -106,6 +107,13 @@ mtx_status mtx_sub(mtx_float *r, const mtx_float *a, const mtx_float *b,
 /* Floating-point multiplication: r = a * b with rounding. */
 mtx_status mtx_mul(mtx_float *r, const mtx_float *a, const mtx_float *b,
                    mtx_rounding rnd);
+
+/* Floating-point division: r = a / b with rounding. */
+mtx_status mtx_div(mtx_float *r, const mtx_float *a, const mtx_float *b,
+                   mtx_rounding rnd);
+
+/* Floating-point square root: r = sqrt(a) with rounding. */
+mtx_status mtx_sqrt(mtx_float *r, const mtx_float *a, mtx_rounding rnd);
 
 bool mtx_is_zero(const mtx_float *x);
 bool mtx_is_normalized(const mtx_float *x);

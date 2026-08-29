@@ -346,6 +346,86 @@ static PyObject *MantixFloat_imul(PyObject *v, PyObject *w)
     return MantixFloat_mul(v, w);
 }
 
+static PyObject *MantixFloat_div(PyObject *v, PyObject *w)
+{
+    if (__builtin_expect(Py_IS_TYPE(v, &MantixFloat_Type) && Py_IS_TYPE(w, &MantixFloat_Type), 1)) {
+        MantixFloatObject *a = (MantixFloatObject *)v;
+        MantixFloatObject *b = (MantixFloatObject *)w;
+        size_t target_prec = a->val.precision > b->val.precision ? a->val.precision : b->val.precision;
+        MantixFloatObject *res = mantix_float_alloc(target_prec);
+        if (__builtin_expect(res == NULL, 0)) return NULL;
+        mtx_status st = mtx_div(&res->val, &a->val, &b->val, MTX_ROUND_TO_NEAREST_EVEN);
+        if (__builtin_expect(st == MTX_ERROR_DIVISION_BY_ZERO, 0)) {
+            Py_DECREF(res);
+            PyErr_SetString(PyExc_ZeroDivisionError, "float division by zero");
+            return NULL;
+        }
+        return (PyObject *)res;
+    }
+
+    size_t prec = 53U;
+    if (Py_IS_TYPE(v, &MantixFloat_Type)) prec = ((MantixFloatObject *)v)->val.precision;
+    else if (Py_IS_TYPE(w, &MantixFloat_Type)) prec = ((MantixFloatObject *)w)->val.precision;
+
+    mtx_float a, b;
+    bool alloc_a = false, alloc_b = false;
+
+    if (to_mantix_float(v, prec, &a, &alloc_a) < 0 || to_mantix_float(w, prec, &b, &alloc_b) < 0) {
+        if (alloc_a) mtx_clear(&a);
+        if (alloc_b) mtx_clear(&b);
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+
+    size_t target_prec = a.precision > b.precision ? a.precision : b.precision;
+    MantixFloatObject *res = mantix_float_alloc(target_prec);
+    if (res == NULL) {
+        if (alloc_a) mtx_clear(&a);
+        if (alloc_b) mtx_clear(&b);
+        return NULL;
+    }
+
+    mtx_status st = mtx_div(&res->val, &a, &b, MTX_ROUND_TO_NEAREST_EVEN);
+
+    if (alloc_a) mtx_clear(&a);
+    if (alloc_b) mtx_clear(&b);
+
+    if (__builtin_expect(st == MTX_ERROR_DIVISION_BY_ZERO, 0)) {
+        Py_DECREF(res);
+        PyErr_SetString(PyExc_ZeroDivisionError, "float division by zero");
+        return NULL;
+    }
+    return (PyObject *)res;
+}
+
+static PyObject *MantixFloat_idiv(PyObject *v, PyObject *w)
+{
+    if (Py_IS_TYPE(v, &MantixFloat_Type) && Py_IS_TYPE(w, &MantixFloat_Type)) {
+        MantixFloatObject *self = (MantixFloatObject *)v;
+        MantixFloatObject *other = (MantixFloatObject *)w;
+        mtx_status st = mtx_div(&self->val, &self->val, &other->val, MTX_ROUND_TO_NEAREST_EVEN);
+        if (__builtin_expect(st == MTX_ERROR_DIVISION_BY_ZERO, 0)) {
+            PyErr_SetString(PyExc_ZeroDivisionError, "float division by zero");
+            return NULL;
+        }
+        Py_INCREF(v);
+        return v;
+    }
+    return MantixFloat_div(v, w);
+}
+
+static PyObject *MantixFloat_sqrt_method(MantixFloatObject *self, PyObject *Py_UNUSED(ignored))
+{
+    MantixFloatObject *res = mantix_float_alloc(self->val.precision);
+    if (res == NULL) return NULL;
+    mtx_status st = mtx_sqrt(&res->val, &self->val, MTX_ROUND_TO_NEAREST_EVEN);
+    if (st != MTX_OK) {
+        Py_DECREF(res);
+        PyErr_SetString(PyExc_ValueError, "math domain error");
+        return NULL;
+    }
+    return (PyObject *)res;
+}
+
 static PyObject *MantixFloat_neg(MantixFloatObject *self)
 {
     MantixFloatObject *res = mantix_float_alloc(self->val.precision);
@@ -468,6 +548,7 @@ static PyMethodDef MantixFloat_methods[] = {
     {"to_f64", (PyCFunction)MantixFloat_to_f64, METH_NOARGS, "Convert to 64-bit double precision float"},
     {"is_zero", (PyCFunction)MantixFloat_is_zero, METH_NOARGS, "Check if value is canonical zero"},
     {"is_normalized", (PyCFunction)MantixFloat_is_normalized, METH_NOARGS, "Check if value is normalized"},
+    {"sqrt", (PyCFunction)MantixFloat_sqrt_method, METH_NOARGS, "Compute square root"},
     {NULL}
 };
 
@@ -475,6 +556,7 @@ static PyNumberMethods MantixFloat_as_number = {
     .nb_add = MantixFloat_add,
     .nb_subtract = MantixFloat_sub,
     .nb_multiply = MantixFloat_mul,
+    .nb_true_divide = MantixFloat_div,
     .nb_negative = (unaryfunc)MantixFloat_neg,
     .nb_absolute = (unaryfunc)MantixFloat_abs,
     .nb_bool = (inquiry)MantixFloat_bool,
@@ -482,6 +564,7 @@ static PyNumberMethods MantixFloat_as_number = {
     .nb_inplace_add = MantixFloat_iadd,
     .nb_inplace_subtract = MantixFloat_isub,
     .nb_inplace_multiply = MantixFloat_imul,
+    .nb_inplace_true_divide = MantixFloat_idiv,
 };
 
 static PyTypeObject MantixFloat_Type = {
@@ -580,9 +663,37 @@ static PyObject *mantix_py_dot(PyObject *self, PyObject *args)
     return (PyObject *)acc;
 }
 
+static PyObject *mantix_py_sqrt(PyObject *self, PyObject *arg)
+{
+    mtx_float a;
+    bool alloc_a = false;
+    size_t prec = 53U;
+    if (Py_IS_TYPE(arg, &MantixFloat_Type)) {
+        prec = ((MantixFloatObject *)arg)->val.precision;
+    }
+    if (to_mantix_float(arg, prec, &a, &alloc_a) < 0) {
+        if (alloc_a) mtx_clear(&a);
+        return NULL;
+    }
+    MantixFloatObject *res = mantix_float_alloc(prec);
+    if (res == NULL) {
+        if (alloc_a) mtx_clear(&a);
+        return NULL;
+    }
+    mtx_status st = mtx_sqrt(&res->val, &a, MTX_ROUND_TO_NEAREST_EVEN);
+    if (alloc_a) mtx_clear(&a);
+    if (st != MTX_OK) {
+        Py_DECREF(res);
+        PyErr_SetString(PyExc_ValueError, "math domain error");
+        return NULL;
+    }
+    return (PyObject *)res;
+}
+
 static PyMethodDef mantix_core_methods[] = {
     {"fma", mantix_py_fma, METH_VARARGS, "Fused multiply-add: fma(a, b, c) -> a * b + c"},
     {"dot", mantix_py_dot, METH_VARARGS, "Vector dot product: dot(seq1, seq2)"},
+    {"sqrt", mantix_py_sqrt, METH_O, "Square root: sqrt(x) -> sqrt(x)"},
     {NULL, NULL, 0, NULL}
 };
 

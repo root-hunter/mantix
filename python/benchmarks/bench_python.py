@@ -80,8 +80,34 @@ def run_benchmarks(precision_bits=53):
     print(f"  mpmath.mpf     : {t_mpmath_add:7.2f} ns")
     print(f"  python float   : {t_py_add:7.2f} ns")
 
-    # 4. In-place Accumulation
-    print(f"\n--- Benchmark 4: In-place Accumulation (acc += val) (ns/op) ---")
+    # 4. Division
+    print(f"\n--- Benchmark 4: Division (a / b) (ns/op) ---")
+    t_mantix_div = time_op(lambda: m_a / m_b)
+    t_gmpy2_div = time_op(lambda: g_a / g_b)
+    t_mpmath_div = time_op(lambda: mp_a / mp_b)
+    t_decimal_div = time_op(lambda: d_a / d_b)
+    t_py_div = time_op(lambda: py_a / py_b)
+
+    print(f"  mantix.Float   : {t_mantix_div:7.2f} ns")
+    print(f"  gmpy2.mpfr     : {t_gmpy2_div:7.2f} ns")
+    print(f"  decimal.Decimal: {t_decimal_div:7.2f} ns")
+    print(f"  mpmath.mpf     : {t_mpmath_div:7.2f} ns")
+    print(f"  python float   : {t_py_div:7.2f} ns")
+
+    # 5. Square Root
+    print(f"\n--- Benchmark 5: Square Root (sqrt(a)) (ns/op) ---")
+    t_mantix_sqrt = time_op(lambda: mantix.sqrt(m_a))
+    t_gmpy2_sqrt = time_op(lambda: gmpy2.sqrt(g_a))
+    t_mpmath_sqrt = time_op(lambda: mpmath.sqrt(mp_a))
+    t_decimal_sqrt = time_op(lambda: d_a.sqrt())
+
+    print(f"  mantix.sqrt    : {t_mantix_sqrt:7.2f} ns")
+    print(f"  gmpy2.sqrt     : {t_gmpy2_sqrt:7.2f} ns")
+    print(f"  decimal.Decimal: {t_decimal_sqrt:7.2f} ns")
+    print(f"  mpmath.sqrt    : {t_mpmath_sqrt:7.2f} ns")
+
+    # 6. In-place Accumulation
+    print(f"\n--- Benchmark 6: In-place Accumulation (acc += val) (ns/op) ---")
     def bench_inplace_mantix(N=1000):
         acc = mantix.Float(0.0, precision=precision_bits)
         val = mantix.Float(1.25, precision=precision_bits)

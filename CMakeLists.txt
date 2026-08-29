@@ -39,6 +39,7 @@ add_library(mantix
 add_library(mantix::mantix ALIAS mantix)
 
 target_compile_features(mantix PUBLIC c_std_17)
+target_link_libraries(mantix PUBLIC m)
 target_include_directories(
     mantix
     PUBLIC
