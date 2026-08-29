@@ -485,6 +485,7 @@ static void mpfr_context_init(mpfr_context *state, size_t precision)
     (void)mpfr_mul_2ui(state->source, state->source,
                        (unsigned long)(precision - 1U), MPFR_RNDN);
     (void)mpfr_add_ui(state->source, state->source, 1U, MPFR_RNDN);
+    (void)mpfr_set(state->destination, state->source, MPFR_RNDN);
 }
 
 static void mpfr_context_clear(mpfr_context *state)

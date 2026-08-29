@@ -906,7 +906,7 @@ mtx_limb mtx_limb_lshift(mtx_limb *result, const mtx_limb *src,
     if (count == 0U) {
         return 0U;
     }
-    if (shift == 0U) {
+    if (__builtin_expect(shift == 0U, 0)) {
         if (result != src) {
             memmove(result, src, count * sizeof(mtx_limb));
         }
@@ -914,6 +914,28 @@ mtx_limb mtx_limb_lshift(mtx_limb *result, const mtx_limb *src,
     }
     unsigned rshift = 64U - shift;
     mtx_limb carry = src[count - 1U] >> rshift;
+
+#if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
+    if (count == 1U) {
+        result[0] = src[0] << shift;
+        return carry;
+    }
+    if (count == 2U) {
+        mtx_limb s0 = src[0], s1 = src[1];
+        result[1] = (s1 << shift) | (s0 >> rshift);
+        result[0] = s0 << shift;
+        return carry;
+    }
+    if (count == 4U) {
+        mtx_limb s0 = src[0], s1 = src[1], s2 = src[2], s3 = src[3];
+        result[3] = (s3 << shift) | (s2 >> rshift);
+        result[2] = (s2 << shift) | (s1 >> rshift);
+        result[1] = (s1 << shift) | (s0 >> rshift);
+        result[0] = s0 << shift;
+        return carry;
+    }
+#endif
+
     for (size_t i = count - 1U; i > 0U; --i) {
         result[i] = (src[i] << shift) | (src[i - 1U] >> rshift);
     }
@@ -924,10 +946,10 @@ mtx_limb mtx_limb_lshift(mtx_limb *result, const mtx_limb *src,
 mtx_limb mtx_limb_rshift(mtx_limb *result, const mtx_limb *src,
                          size_t count, unsigned shift)
 {
-    if (count == 0U) {
+    if (__builtin_expect(count == 0U, 0)) {
         return 0U;
     }
-    if (shift == 0U) {
+    if (__builtin_expect(shift == 0U, 0)) {
         if (result != src) {
             memmove(result, src, count * sizeof(mtx_limb));
         }
@@ -935,6 +957,28 @@ mtx_limb mtx_limb_rshift(mtx_limb *result, const mtx_limb *src,
     }
     unsigned lshift = 64U - shift;
     mtx_limb dropped = src[0] & ((UINT64_C(1) << shift) - 1U);
+
+#if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
+    if (count == 1U) {
+        result[0] = src[0] >> shift;
+        return dropped;
+    }
+    if (count == 2U) {
+        mtx_limb s0 = src[0], s1 = src[1];
+        result[0] = (s0 >> shift) | (s1 << lshift);
+        result[1] = s1 >> shift;
+        return dropped;
+    }
+    if (count == 4U) {
+        mtx_limb s0 = src[0], s1 = src[1], s2 = src[2], s3 = src[3];
+        result[0] = (s0 >> shift) | (s1 << lshift);
+        result[1] = (s1 >> shift) | (s2 << lshift);
+        result[2] = (s2 >> shift) | (s3 << lshift);
+        result[3] = s3 >> shift;
+        return dropped;
+    }
+#endif
+
     for (size_t i = 0U; i < count - 1U; ++i) {
         result[i] = (src[i] >> shift) | (src[i + 1U] << lshift);
     }

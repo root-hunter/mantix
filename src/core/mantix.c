@@ -419,39 +419,53 @@ static mtx_status mtx_round_and_canonicalize(mtx_float *r, mtx_limb *limbs,
         return MTX_OK;
     }
 
-    /* Fast path when already odd and fits in target precision */
-    if ((limbs[0] & UINT64_C(1)) != 0U) {
-        size_t bits = (used - 1U) * 64U + (64U - mtx_leading_zeroes_u64(limbs[used - 1U]));
-        if (bits <= r->precision) {
-            if (__builtin_expect(used > r->capacity, 0)) {
-                mtx_status st = mtx_reserve(r, used);
-                if (st != MTX_OK) return st;
+    size_t bits = (used - 1U) * 64U + (64U - mtx_leading_zeroes_u64(limbs[used - 1U]));
+    if (bits <= r->precision) {
+        if ((limbs[0] & UINT64_C(1)) == 0U) {
+            size_t tz_limbs = 0U;
+            while (tz_limbs < used && limbs[tz_limbs] == 0U) {
+                ++tz_limbs;
             }
-            if (used == 1U) {
-                r->limbs[0] = limbs[0];
-            } else if (used == 2U) {
-                r->limbs[0] = limbs[0];
-                r->limbs[1] = limbs[1];
-            } else if (used == 3U) {
-                r->limbs[0] = limbs[0];
-                r->limbs[1] = limbs[1];
-                r->limbs[2] = limbs[2];
-            } else if (used == 4U) {
-                r->limbs[0] = limbs[0];
-                r->limbs[1] = limbs[1];
-                r->limbs[2] = limbs[2];
-                r->limbs[3] = limbs[3];
-            } else {
-                memcpy(r->limbs, limbs, used * sizeof(mtx_limb));
+            if (tz_limbs > 0U) {
+                used -= tz_limbs;
+                memmove(limbs, limbs + tz_limbs, used * sizeof(mtx_limb));
+                exponent += (int64_t)(tz_limbs * 64U);
             }
-            r->used = used;
-            r->exponent = exponent;
-            r->negative = negative;
-            return MTX_OK;
+            unsigned tz = mtx_trailing_zeroes_u64(limbs[0]);
+            if (tz > 0U) {
+                mtx_limb_rshift(limbs, limbs, used, tz);
+                exponent += (int64_t)tz;
+                while (used > 0U && limbs[used - 1U] == 0U) {
+                    --used;
+                }
+            }
         }
+        if (__builtin_expect(used > r->capacity, 0)) {
+            mtx_status st = mtx_reserve(r, used);
+            if (st != MTX_OK) return st;
+        }
+        if (used == 1U) {
+            r->limbs[0] = limbs[0];
+        } else if (used == 2U) {
+            r->limbs[0] = limbs[0];
+            r->limbs[1] = limbs[1];
+        } else if (used == 3U) {
+            r->limbs[0] = limbs[0];
+            r->limbs[1] = limbs[1];
+            r->limbs[2] = limbs[2];
+        } else if (used == 4U) {
+            r->limbs[0] = limbs[0];
+            r->limbs[1] = limbs[1];
+            r->limbs[2] = limbs[2];
+            r->limbs[3] = limbs[3];
+        } else {
+            memcpy(r->limbs, limbs, used * sizeof(mtx_limb));
+        }
+        r->used = used;
+        r->exponent = exponent;
+        r->negative = negative;
+        return MTX_OK;
     }
-
-    size_t bits = mtx_count_bits(limbs, used);
     if (bits > r->precision) {
         size_t drop = bits - r->precision;
         size_t drop_limbs = drop / 64U;
@@ -696,33 +710,33 @@ mtx_status mtx_add(mtx_float *r, const mtx_float *a, const mtx_float *b,
 
     bool effective_sub = (op_a->negative != op_b->negative);
 
+    /* If exponent difference is larger than precision window, op_b is negligible */
+    if (__builtin_expect(delta_exp > op_b->used * 64U + r->precision + 64U, 0)) {
+        return mtx_set(r, op_a);
+    }
+
     size_t shift_limbs = (size_t)(delta_exp / 64U);
     unsigned shift_rem = (unsigned)(delta_exp % 64U);
 
     size_t a_aligned_limbs = op_a->used + shift_limbs + 2U;
     size_t max_limbs = (a_aligned_limbs > op_b->used ? a_aligned_limbs : op_b->used) + 2U;
 
-    mtx_limb stack_a[64];
-    mtx_limb stack_b[64];
-    mtx_limb stack_r[64];
+    mtx_limb stack_buf[200];
+    mtx_limb *buf = stack_buf;
 
-    mtx_limb *buf_a = stack_a;
-    mtx_limb *buf_b = stack_b;
-    mtx_limb *buf_r = stack_r;
-
-    if (max_limbs > 64U) {
-        buf_a = calloc(max_limbs, sizeof(mtx_limb));
-        buf_b = calloc(max_limbs, sizeof(mtx_limb));
-        buf_r = calloc(max_limbs, sizeof(mtx_limb));
-        if (buf_a == NULL || buf_b == NULL || buf_r == NULL) {
-            free(buf_a); free(buf_b); free(buf_r);
+    if (max_limbs * 3U > sizeof(stack_buf) / sizeof(stack_buf[0])) {
+        buf = malloc(max_limbs * 3U * sizeof(mtx_limb));
+        if (buf == NULL) {
             return MTX_ERROR_OUT_OF_MEMORY;
         }
-    } else {
-        memset(stack_a, 0, max_limbs * sizeof(mtx_limb));
-        memset(stack_b, 0, max_limbs * sizeof(mtx_limb));
-        memset(stack_r, 0, max_limbs * sizeof(mtx_limb));
     }
+
+    mtx_limb *buf_a = buf;
+    mtx_limb *buf_b = buf + max_limbs;
+    mtx_limb *buf_r = buf + max_limbs * 2U;
+
+    memset(buf_a, 0, max_limbs * sizeof(mtx_limb));
+    memset(buf_b, 0, max_limbs * sizeof(mtx_limb));
 
     if (shift_rem == 0U) {
         memcpy(buf_a + shift_limbs, op_a->limbs, op_a->used * sizeof(mtx_limb));
@@ -742,7 +756,7 @@ mtx_status mtx_add(mtx_float *r, const mtx_float *a, const mtx_float *b,
         int cmp = mtx_limb_cmp_n(buf_a, buf_b, max_limbs);
         if (cmp == 0) {
             mtx_set_zero(r);
-            if (buf_a != stack_a) { free(buf_a); free(buf_b); free(buf_r); }
+            if (buf != stack_buf) free(buf);
             return MTX_OK;
         } else if (cmp > 0) {
             mtx_limb_sub_n(buf_r, buf_a, buf_b, max_limbs);
@@ -759,8 +773,8 @@ mtx_status mtx_add(mtx_float *r, const mtx_float *a, const mtx_float *b,
 
     mtx_status status = mtx_round_and_canonicalize(r, buf_r, result_used, base_exp, res_negative, rnd);
 
-    if (buf_a != stack_a) {
-        free(buf_a); free(buf_b); free(buf_r);
+    if (buf != stack_buf) {
+        free(buf);
     }
     return status;
 }
