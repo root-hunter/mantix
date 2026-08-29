@@ -957,67 +957,49 @@ mtx_status mtx_sqrt(mtx_float *r, const mtx_float *a, mtx_rounding rnd)
         return MTX_OK;
     }
 
-    /* Fast path for single limb / standard precision */
-    if (a->used == 1U && r->precision <= 53U) {
-        double d = (double)a->limbs[0];
-        int64_t exp = a->exponent;
-        if (exp % 2 != 0) {
-            d *= 2.0;
-            --exp;
+    /* Fast path for <= 53 bits */
+    if (r->precision <= 53U) {
+        double d = mtx_get_f64(a, MTX_ROUND_TO_NEAREST_EVEN);
+        if (d > 0.0) {
+            double res = sqrt(d);
+            return mtx_set_f64(r, res);
         }
-        double res = sqrt(d);
-        return mtx_set_f64(r, ldexp(res, (int)(exp / 2)));
     }
 
+    /* Precision-doubling Newton-Raphson: x_{k+1} = 0.5 * (x_k + a / x_k) */
+    double d = mtx_get_f64(a, MTX_ROUND_TO_NEAREST_EVEN);
+    double s0 = sqrt(d > 0.0 ? d : 1.0);
+
+    mtx_float x, q, half;
     size_t target_prec = r->precision + 64U;
-    size_t target_limbs = (target_prec + 63U) / 64U;
+    if (mtx_init(&x, target_prec) != MTX_OK) return MTX_ERROR_OUT_OF_MEMORY;
+    if (mtx_init(&q, target_prec) != MTX_OK) { mtx_clear(&x); return MTX_ERROR_OUT_OF_MEMORY; }
+    if (mtx_init(&half, target_prec) != MTX_OK) { mtx_clear(&x); mtx_clear(&q); return MTX_ERROR_OUT_OF_MEMORY; }
 
-    /* Make sure exponent is even */
-    int64_t exp = a->exponent;
-    size_t exp_adjust = 0U;
-    if (exp % 2 != 0) {
-        --exp;
-        exp_adjust = 1U;
-    }
-    int64_t res_exp = (exp - (int64_t)(target_limbs * 2U * 64U)) / 2;
+    mtx_set_f64(&x, s0);
+    mtx_set_f64(&half, 0.5);
 
-    size_t num_limbs = target_limbs * 2U + a->used + 2U;
-    mtx_limb stack_buf[256];
-    mtx_limb *buf = stack_buf;
-    if (num_limbs * 2U > sizeof(stack_buf) / sizeof(stack_buf[0])) {
-        buf = malloc(num_limbs * 2U * sizeof(mtx_limb));
-        if (buf == NULL) return MTX_ERROR_OUT_OF_MEMORY;
-    }
+    size_t cur_prec = 53U;
+    while (cur_prec < target_prec) {
+        cur_prec *= 2U;
+        if (cur_prec > target_prec) {
+            cur_prec = target_prec;
+        }
+        x.precision = cur_prec;
+        q.precision = cur_prec;
+        half.precision = cur_prec;
 
-    mtx_limb *num = buf;
-    mtx_limb *root = buf + num_limbs;
-    memset(num, 0, num_limbs * sizeof(mtx_limb));
-    memset(root, 0, num_limbs * sizeof(mtx_limb));
-
-    size_t shift_limbs = target_limbs * 2U;
-    if (exp_adjust == 0U) {
-        memcpy(num + shift_limbs, a->limbs, a->used * sizeof(mtx_limb));
-    } else {
-        mtx_limb carry = mtx_limb_lshift(num + shift_limbs, a->limbs, a->used, 1U);
-        num[shift_limbs + a->used] = carry;
+        mtx_div(&q, a, &x, MTX_ROUND_TO_NEAREST_EVEN);
+        mtx_add(&x, &x, &q, MTX_ROUND_TO_NEAREST_EVEN);
+        mtx_mul(&x, &x, &half, MTX_ROUND_TO_NEAREST_EVEN);
     }
 
-    size_t total_count = shift_limbs + a->used + 1U;
-    while (total_count > 0U && num[total_count - 1U] == 0U) {
-        --total_count;
-    }
+    mtx_status st = mtx_round_and_canonicalize(r, x.limbs, x.used, x.exponent, false, rnd);
 
-    mtx_limb_sqrt(root, num, total_count);
-
-    size_t root_used = (total_count + 1U) / 2U;
-    while (root_used > 0U && root[root_used - 1U] == 0U) {
-        --root_used;
-    }
-
-    mtx_status status = mtx_round_and_canonicalize(r, root, root_used, res_exp, false, rnd);
-
-    if (buf != stack_buf) free(buf);
-    return status;
+    mtx_clear(&half);
+    mtx_clear(&q);
+    mtx_clear(&x);
+    return st;
 }
 
 double mtx_get_d(const mtx_float *x, mtx_rounding rnd)
