@@ -407,9 +407,9 @@ int mtx_cmp(const mtx_float *a, const mtx_float *b)
     return cmp * sign;
 }
 
-static mtx_status mtx_round_and_canonicalize(mtx_float *r, mtx_limb *limbs,
-                                             size_t used, int64_t exponent,
-                                             bool negative, mtx_rounding rnd)
+static inline mtx_status mtx_round_and_canonicalize(mtx_float *r, mtx_limb *limbs,
+                                                    size_t used, int64_t exponent,
+                                                    bool negative, mtx_rounding rnd)
 {
     while (used > 0U && limbs[used - 1U] == 0U) {
         --used;
@@ -419,7 +419,42 @@ static mtx_status mtx_round_and_canonicalize(mtx_float *r, mtx_limb *limbs,
         return MTX_OK;
     }
 
-    size_t bits = (used - 1U) * 64U + (64U - mtx_leading_zeroes_u64(limbs[used - 1U]));
+    /* Fast path for canonical result (lowest bit is odd) fitting within precision */
+    if ((limbs[0] & UINT64_C(1)) != 0U) {
+        size_t lz = (size_t)mtx_leading_zeroes_u64(limbs[used - 1U]);
+        size_t bits = used * 64U - lz;
+        if (__builtin_expect(bits <= r->precision, 1)) {
+            if (__builtin_expect(used > r->capacity, 0)) {
+                mtx_status st = mtx_reserve(r, used);
+                if (st != MTX_OK) return st;
+            }
+            if (r->limbs != limbs) {
+                if (used == 1U) {
+                    r->limbs[0] = limbs[0];
+                } else if (used == 2U) {
+                    r->limbs[0] = limbs[0];
+                    r->limbs[1] = limbs[1];
+                } else if (used == 3U) {
+                    r->limbs[0] = limbs[0];
+                    r->limbs[1] = limbs[1];
+                    r->limbs[2] = limbs[2];
+                } else if (used == 4U) {
+                    r->limbs[0] = limbs[0];
+                    r->limbs[1] = limbs[1];
+                    r->limbs[2] = limbs[2];
+                    r->limbs[3] = limbs[3];
+                } else {
+                    memcpy(r->limbs, limbs, used * sizeof(mtx_limb));
+                }
+            }
+            r->used = used;
+            r->exponent = exponent;
+            r->negative = negative;
+            return MTX_OK;
+        }
+    }
+
+    size_t bits = (used - 1U) * 64U + (64U - (size_t)mtx_leading_zeroes_u64(limbs[used - 1U]));
     if (bits <= r->precision) {
         if ((limbs[0] & UINT64_C(1)) == 0U) {
             size_t tz_limbs = 0U;
@@ -966,18 +1001,31 @@ mtx_status mtx_sqrt(mtx_float *r, const mtx_float *a, mtx_rounding rnd)
         }
     }
 
+    /* Fast path for <= 64 bits */
+    if (r->precision <= 64U && a->used <= 2U) {
+        uint64_t a1 = (a->used >= 2U) ? a->limbs[1] : 0U;
+        uint64_t a0 = (a->used >= 1U) ? a->limbs[0] : 0U;
+        int64_t exp = a->exponent;
+        if (exp % 2 != 0) {
+            --exp;
+            a1 = (a1 << 1U) | (a0 >> 63U);
+            a0 = a0 << 1U;
+        }
+        uint64_t root = mtx_limb_sqrt_2(a1, a0);
+        mtx_limb r_limbs[1] = {root};
+        return mtx_round_and_canonicalize(r, r_limbs, 1U, exp / 2, false, rnd);
+    }
+
     /* Precision-doubling Newton-Raphson: x_{k+1} = 0.5 * (x_k + a / x_k) */
     double d = mtx_get_f64(a, MTX_ROUND_TO_NEAREST_EVEN);
     double s0 = sqrt(d > 0.0 ? d : 1.0);
 
-    mtx_float x, q, half;
+    mtx_float x, q;
     size_t target_prec = r->precision + 64U;
     if (mtx_init(&x, target_prec) != MTX_OK) return MTX_ERROR_OUT_OF_MEMORY;
     if (mtx_init(&q, target_prec) != MTX_OK) { mtx_clear(&x); return MTX_ERROR_OUT_OF_MEMORY; }
-    if (mtx_init(&half, target_prec) != MTX_OK) { mtx_clear(&x); mtx_clear(&q); return MTX_ERROR_OUT_OF_MEMORY; }
 
     mtx_set_f64(&x, s0);
-    mtx_set_f64(&half, 0.5);
 
     size_t cur_prec = 53U;
     while (cur_prec < target_prec) {
@@ -987,16 +1035,14 @@ mtx_status mtx_sqrt(mtx_float *r, const mtx_float *a, mtx_rounding rnd)
         }
         x.precision = cur_prec;
         q.precision = cur_prec;
-        half.precision = cur_prec;
 
         mtx_div(&q, a, &x, MTX_ROUND_TO_NEAREST_EVEN);
         mtx_add(&x, &x, &q, MTX_ROUND_TO_NEAREST_EVEN);
-        mtx_mul(&x, &x, &half, MTX_ROUND_TO_NEAREST_EVEN);
+        --x.exponent;
     }
 
     mtx_status st = mtx_round_and_canonicalize(r, x.limbs, x.used, x.exponent, false, rnd);
 
-    mtx_clear(&half);
     mtx_clear(&q);
     mtx_clear(&x);
     return st;

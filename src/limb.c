@@ -1452,3 +1452,31 @@ void mtx_limb_sqrt(mtx_limb *root, const mtx_limb *num, size_t count)
 
     if (q_buf != stack_buf) free(q_buf);
 }
+
+uint64_t mtx_limb_sqrt_2(uint64_t a1, uint64_t a0)
+{
+    if (a1 == 0U) {
+        uint64_t x = (uint64_t)sqrt((double)a0);
+        if ((__uint128_t)(x + 1U) * (x + 1U) <= a0) ++x;
+        else if ((__uint128_t)x * x > a0) --x;
+        return x;
+    }
+
+    /* Fast hardware sqrt seed */
+    double top_val = (double)a1 * 18446744073709551616.0 + (double)a0;
+    uint64_t x = (uint64_t)sqrt(top_val);
+
+    /* 1 single Newton step with __uint128_t hardware division */
+    __uint128_t num = ((__uint128_t)a1 << 64U) | a0;
+    uint64_t q = (uint64_t)(num / x);
+    x = (uint64_t)(((uint64_t)x + q) >> 1U);
+
+    /* Final adjustment */
+    while ((__uint128_t)x * x > num) {
+        --x;
+    }
+    while ((__uint128_t)(x + 1U) * (x + 1U) <= num) {
+        ++x;
+    }
+    return x;
+}

@@ -76,6 +76,12 @@ void mtx_limb_div_qr(mtx_limb *quotient, mtx_limb *remainder,
                      const mtx_limb *divisor, size_t v_count);
 
 /*
+ * 2-limb integer square root: S = floor(sqrt(a1 * 2^64 + a0)).
+ * Returns exact 64-bit root S.
+ */
+uint64_t mtx_limb_sqrt_2(uint64_t a1, uint64_t a0);
+
+/*
  * Multi-limb integer square root: root = floor(sqrt(num)).
  * num has count limbs, root has (count + 1) / 2 limbs.
  */
