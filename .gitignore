@@ -1,0 +1,11 @@
+/build*/
+/bin/
+compile_commands.json
+.cache/
+.venv/
+__pycache__/
+*.so
+*.egg-info/
+dist/
+build/
+

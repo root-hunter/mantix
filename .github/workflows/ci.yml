@@ -1,0 +1,115 @@
+name: Mantix CI & Benchmarks
+
+on:
+  push:
+    branches: [ main, "**" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Test (C + Python + Sanitizers)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build libgmp-dev libmpfr-dev python3-dev python3-venv
+
+      - name: Check Compiler Version
+        run: clang --version
+
+      - name: Build & Run C Unit Tests
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      - name: Build & Run Sanitizers (ASan + UBSan)
+        run: |
+          cmake -S . -B build-sanitize -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug -DMANTIX_ENABLE_SANITIZERS=ON
+          cmake --build build-sanitize
+          ctest --test-dir build-sanitize --output-on-failure
+
+      - name: Setup Python Virtual Environment & Test Python Package
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip setuptools wheel
+          pip install gmpy2 mpmath pytest
+          pip install -e .
+          pytest python/tests
+
+  benchmarks:
+    name: Benchmarks & Performance Reports
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build libgmp-dev libmpfr-dev python3-dev python3-venv
+
+      - name: Create Artifacts Directory
+        run: mkdir -p reports
+
+      - name: Build C Benchmarks
+        run: |
+          cmake -S . -B build-bench -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Release -DMANTIX_BUILD_BENCHMARKS=ON -DMANTIX_BUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF
+          cmake --build build-bench --target mantix_bench
+
+      - name: Run C Benchmark Suite (Text & CSV)
+        run: |
+          ./build-bench/mantix_bench | tee reports/benchmarks-c.txt
+          ./build-bench/mantix_bench --csv --output reports/benchmarks-c.csv
+
+      - name: Setup Python Environment for Benchmarks
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip setuptools wheel
+          pip install gmpy2 mpmath
+          pip install -e .
+
+      - name: Run Python Benchmarks
+        run: |
+          source .venv/bin/activate
+          python3 python/benchmarks/bench_python.py | tee reports/benchmarks-python.txt
+
+      - name: Generate Markdown Benchmark Summary
+        run: |
+          cat << 'END_MD' > reports/benchmark-summary.md
+          # 🚀 Mantix Benchmark Report
+
+          ## 1. C Core Benchmarks (Mantix vs GMP vs MPFR)
+          ```text
+          END_MD
+          cat reports/benchmarks-c.txt >> reports/benchmark-summary.md
+          cat << 'END_MD' >> reports/benchmark-summary.md
+          ```
+
+          ## 2. Python Benchmarks (Mantix vs gmpy2 vs mpmath vs Decimal vs float)
+          ```text
+          END_MD
+          cat reports/benchmarks-python.txt >> reports/benchmark-summary.md
+          cat << 'END_MD' >> reports/benchmark-summary.md
+          ```
+          END_MD
+
+      - name: Publish Summary to GitHub Actions UI
+        run: |
+          cat reports/benchmark-summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Benchmark Reports Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mantix-benchmark-reports
+          path: reports/
+          retention-days: 30
