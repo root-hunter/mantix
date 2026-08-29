@@ -1,6 +1,7 @@
 #include "mantix/limb.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
