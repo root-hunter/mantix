@@ -11,10 +11,13 @@ extern "C" {
 #endif
 
 typedef enum mtx_cpu_feature {
-    MTX_CPU_FEATURE_NONE = 0U,
-    MTX_CPU_FEATURE_BMI2 = 1U << 0U,
-    MTX_CPU_FEATURE_ADX = 1U << 1U,
-    MTX_CPU_FEATURE_AVX2 = 1U << 2U
+    MTX_CPU_FEATURE_NONE   = 0U,
+    MTX_CPU_FEATURE_BMI2   = 1U << 0U,
+    MTX_CPU_FEATURE_ADX    = 1U << 1U,
+    MTX_CPU_FEATURE_AVX2   = 1U << 2U,
+    MTX_CPU_FEATURE_AVX512 = 1U << 3U,
+    MTX_CPU_FEATURE_NEON   = 1U << 4U,
+    MTX_CPU_FEATURE_SVE    = 1U << 5U
 } mtx_cpu_feature;
 
 /* Runtime CPU feature mask. Unsupported architectures return NONE. */

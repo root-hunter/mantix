@@ -32,6 +32,16 @@ uint32_t mtx_cpu_features(void)
     if (__builtin_cpu_supports("avx2")) {
         features |= MTX_CPU_FEATURE_AVX2;
     }
+    if (__builtin_cpu_supports("avx512f")) {
+        features |= MTX_CPU_FEATURE_AVX512;
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    features |= MTX_CPU_FEATURE_NEON;
+#endif
+#if defined(__ARM_FEATURE_SVE)
+    features |= MTX_CPU_FEATURE_SVE;
+#endif
 #endif
     return features;
 }
@@ -40,6 +50,9 @@ const char *mtx_limb_backend(void)
 {
 #if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
     __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("bmi2") && mtx_has_adx()) {
+        return "x86_64-adc+bmi2+adx+avx512";
+    }
     if (__builtin_cpu_supports("bmi2") && mtx_has_adx()) {
         return "x86_64-adc+bmi2+adx";
     }
@@ -47,6 +60,12 @@ const char *mtx_limb_backend(void)
         return "x86_64-adc+bmi2";
     }
     return "x86_64-adc+u128";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__ARM_FEATURE_SVE)
+    return "arm64-adcs+umulh+sve";
+#else
+    return "arm64-adcs+umulh+neon";
+#endif
 #elif defined(__SIZEOF_INT128__)
     return "portable-u128";
 #else
@@ -702,6 +721,82 @@ mtx_limb mtx_limb_add_n(mtx_limb *result, const mtx_limb *left,
         :
         : "r8", "cc", "memory");
     return (mtx_limb)carry;
+#elif defined(__aarch64__) && (defined(__clang__) || defined(__GNUC__))
+    if (count == 2U) {
+        mtx_limb r0, r1, carry;
+        __asm__ volatile(
+            "adds %0, %3, %5\n\t"
+            "adcs %1, %4, %6\n\t"
+            "adc  %2, xzr, xzr\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(carry)
+            : "r"(left[0]), "r"(left[1]), "r"(right[0]), "r"(right[1])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1;
+        return carry;
+    }
+    if (count == 3U) {
+        mtx_limb r0, r1, r2, carry;
+        __asm__ volatile(
+            "adds %0, %4, %7\n\t"
+            "adcs %1, %5, %8\n\t"
+            "adcs %2, %6, %9\n\t"
+            "adc  %3, xzr, xzr\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(r2), "=&r"(carry)
+            : "r"(left[0]), "r"(left[1]), "r"(left[2]),
+              "r"(right[0]), "r"(right[1]), "r"(right[2])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1; result[2] = r2;
+        return carry;
+    }
+    if (count == 4U) {
+        mtx_limb r0, r1, r2, r3, carry;
+        __asm__ volatile(
+            "adds %0, %5, %9\n\t"
+            "adcs %1, %6, %10\n\t"
+            "adcs %2, %7, %11\n\t"
+            "adcs %3, %8, %12\n\t"
+            "adc  %4, xzr, xzr\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(r2), "=&r"(r3), "=&r"(carry)
+            : "r"(left[0]), "r"(left[1]), "r"(left[2]), "r"(left[3]),
+              "r"(right[0]), "r"(right[1]), "r"(right[2]), "r"(right[3])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1; result[2] = r2; result[3] = r3;
+        return carry;
+    }
+    if (count == 8U) {
+        mtx_limb r0, r1, r2, r3, r4, r5, r6, r7, carry;
+        __asm__ volatile(
+            "adds %0, %9, %17\n\t"
+            "adcs %1, %10, %18\n\t"
+            "adcs %2, %11, %19\n\t"
+            "adcs %3, %12, %20\n\t"
+            "adcs %4, %13, %21\n\t"
+            "adcs %5, %14, %22\n\t"
+            "adcs %6, %15, %23\n\t"
+            "adcs %7, %16, %24\n\t"
+            "adc  %8, xzr, xzr\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(r2), "=&r"(r3),
+              "=&r"(r4), "=&r"(r5), "=&r"(r6), "=&r"(r7), "=&r"(carry)
+            : "r"(left[0]), "r"(left[1]), "r"(left[2]), "r"(left[3]),
+              "r"(left[4]), "r"(left[5]), "r"(left[6]), "r"(left[7]),
+              "r"(right[0]), "r"(right[1]), "r"(right[2]), "r"(right[3]),
+              "r"(right[4]), "r"(right[5]), "r"(right[6]), "r"(right[7])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1; result[2] = r2; result[3] = r3;
+        result[4] = r4; result[5] = r5; result[6] = r6; result[7] = r7;
+        return carry;
+    }
+    mtx_limb carry = 0U;
+    for (size_t i = 0U; i < count; ++i) {
+        __uint128_t sum = (__uint128_t)left[i] + right[i] + carry;
+        result[i] = (mtx_limb)sum;
+        carry = (mtx_limb)(sum >> 64U);
+    }
+    return carry;
 #elif defined(__SIZEOF_INT128__)
     mtx_limb carry = 0U;
 
@@ -885,6 +980,85 @@ mtx_limb mtx_limb_sub_n(mtx_limb *result, const mtx_limb *left,
         :
         : "r8", "cc", "memory");
     return (mtx_limb)borrow;
+#elif defined(__aarch64__) && (defined(__clang__) || defined(__GNUC__))
+    if (count == 2U) {
+        mtx_limb r0, r1, borrow;
+        __asm__ volatile(
+            "subs %0, %3, %5\n\t"
+            "sbcs %1, %4, %6\n\t"
+            "cset %2, cc\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(borrow)
+            : "r"(left[0]), "r"(left[1]), "r"(right[0]), "r"(right[1])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1;
+        return borrow;
+    }
+    if (count == 3U) {
+        mtx_limb r0, r1, r2, borrow;
+        __asm__ volatile(
+            "subs %0, %4, %7\n\t"
+            "sbcs %1, %5, %8\n\t"
+            "sbcs %2, %6, %9\n\t"
+            "cset %3, cc\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(r2), "=&r"(borrow)
+            : "r"(left[0]), "r"(left[1]), "r"(left[2]),
+              "r"(right[0]), "r"(right[1]), "r"(right[2])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1; result[2] = r2;
+        return borrow;
+    }
+    if (count == 4U) {
+        mtx_limb r0, r1, r2, r3, borrow;
+        __asm__ volatile(
+            "subs %0, %5, %9\n\t"
+            "sbcs %1, %6, %10\n\t"
+            "sbcs %2, %7, %11\n\t"
+            "sbcs %3, %8, %12\n\t"
+            "cset %4, cc\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(r2), "=&r"(r3), "=&r"(borrow)
+            : "r"(left[0]), "r"(left[1]), "r"(left[2]), "r"(left[3]),
+              "r"(right[0]), "r"(right[1]), "r"(right[2]), "r"(right[3])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1; result[2] = r2; result[3] = r3;
+        return borrow;
+    }
+    if (count == 8U) {
+        mtx_limb r0, r1, r2, r3, r4, r5, r6, r7, borrow;
+        __asm__ volatile(
+            "subs %0, %9, %17\n\t"
+            "sbcs %1, %10, %18\n\t"
+            "sbcs %2, %11, %19\n\t"
+            "sbcs %3, %12, %20\n\t"
+            "sbcs %4, %13, %21\n\t"
+            "sbcs %5, %14, %22\n\t"
+            "sbcs %6, %15, %23\n\t"
+            "sbcs %7, %16, %24\n\t"
+            "cset %8, cc\n\t"
+            : "=&r"(r0), "=&r"(r1), "=&r"(r2), "=&r"(r3),
+              "=&r"(r4), "=&r"(r5), "=&r"(r6), "=&r"(r7), "=&r"(borrow)
+            : "r"(left[0]), "r"(left[1]), "r"(left[2]), "r"(left[3]),
+              "r"(left[4]), "r"(left[5]), "r"(left[6]), "r"(left[7]),
+              "r"(right[0]), "r"(right[1]), "r"(right[2]), "r"(right[3]),
+              "r"(right[4]), "r"(right[5]), "r"(right[6]), "r"(right[7])
+            : "cc"
+        );
+        result[0] = r0; result[1] = r1; result[2] = r2; result[3] = r3;
+        result[4] = r4; result[5] = r5; result[6] = r6; result[7] = r7;
+        return borrow;
+    }
+    mtx_limb borrow = 0U;
+    for (size_t i = 0U; i < count; ++i) {
+        mtx_limb partial = left[i] - borrow;
+        mtx_limb borrow_left = (mtx_limb)(left[i] < borrow);
+        mtx_limb difference = partial - right[i];
+        mtx_limb borrow_right = (mtx_limb)(partial < right[i]);
+        result[i] = difference;
+        borrow = borrow_left | borrow_right;
+    }
+    return borrow;
 #else
     mtx_limb borrow = 0U;
 
@@ -915,7 +1089,7 @@ mtx_limb mtx_limb_lshift(mtx_limb *result, const mtx_limb *src,
     unsigned rshift = 64U - shift;
     mtx_limb carry = src[count - 1U] >> rshift;
 
-#if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
+#if (defined(__x86_64__) || defined(__aarch64__)) && (defined(__clang__) || defined(__GNUC__))
     if (count == 1U) {
         result[0] = src[0] << shift;
         return carry;
@@ -958,7 +1132,7 @@ mtx_limb mtx_limb_rshift(mtx_limb *result, const mtx_limb *src,
     unsigned lshift = 64U - shift;
     mtx_limb dropped = src[0] & ((UINT64_C(1) << shift) - 1U);
 
-#if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
+#if (defined(__x86_64__) || defined(__aarch64__)) && (defined(__clang__) || defined(__GNUC__))
     if (count == 1U) {
         result[0] = src[0] >> shift;
         return dropped;
