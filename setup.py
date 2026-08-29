@@ -3,8 +3,8 @@ from setuptools import setup, find_packages, Extension
 
 mantix_core_sources = [
     "python/src/_core.c",
-    "src/core/mantix.c",
-    "src/kernels/scalar/limb.c",
+    "src/mantix.c",
+    "src/limb.c",
 ]
 
 mantix_module = Extension(

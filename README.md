@@ -22,20 +22,18 @@ dynamic storage.
 ## Source layout
 
 ```text
+include/
+  mantix/
+    mantix.h            High-level arbitrary-precision floating-point API
+    limb.h              Low-level multi-limb arithmetic, hardware kernels, division & sqrt
 src/
-  core/                 High-level values, ownership, and public API
-  kernels/
-    scalar/             Portable and scalar CPU limb kernels
-    avx2/               Planned AVX2 kernels
-    avx512/             Planned AVX-512 kernels
-    amx/                Planned Intel AMX kernels
-    neon/               Planned Arm NEON kernels
-    cuda/               Planned NVIDIA CUDA kernels
+  mantix.c              High-level floating-point engine, conversions, rounding & math
+  limb.c                Multi-limb scalar & hardware assembly kernels (x86_64 ADX/BMI2 & ARM64)
+python/
+  mantix/               Python package interface
+  src/
+    _core.c             High-performance Python C extension module
 ```
-
-Only the scalar backend is implemented today. Architecture-specific backends
-will be added independently and selected by a dispatch layer once their APIs
-and supported workloads are defined.
 
 ## Build and test
 

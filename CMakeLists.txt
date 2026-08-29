@@ -24,17 +24,13 @@ option(MANTIX_BUILD_EXAMPLES "Build Mantix examples" ON)
 option(MANTIX_BUILD_BENCHMARKS "Build Mantix microbenchmarks" OFF)
 option(MANTIX_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
-set(MANTIX_CORE_SOURCES
-    src/core/mantix.c
-)
-
-set(MANTIX_KERNEL_SOURCES
-    src/kernels/scalar/limb.c
+set(MANTIX_SOURCES
+    src/mantix.c
+    src/limb.c
 )
 
 add_library(mantix
-    ${MANTIX_CORE_SOURCES}
-    ${MANTIX_KERNEL_SOURCES}
+    ${MANTIX_SOURCES}
 )
 add_library(mantix::mantix ALIAS mantix)
 
