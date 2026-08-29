@@ -157,7 +157,8 @@ int main(void)
     uint32_t features = mtx_cpu_features();
     assert(mtx_limb_backend() != NULL);
     assert((features & ~(uint32_t)(MTX_CPU_FEATURE_BMI2 | MTX_CPU_FEATURE_ADX |
-                                  MTX_CPU_FEATURE_AVX2)) == 0U);
+                                  MTX_CPU_FEATURE_AVX2 | MTX_CPU_FEATURE_AVX512 |
+                                  MTX_CPU_FEATURE_NEON | MTX_CPU_FEATURE_SVE)) == 0U);
     test_edges();
     test_random_and_aliasing();
     test_multiply_edges();
