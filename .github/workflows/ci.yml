@@ -1,4 +1,4 @@
-name: Mantix CI & Benchmarks
+name: Mantix CI & Benchmarks (Multi-Arch)
 
 on:
   push:
@@ -9,8 +9,16 @@ on:
 
 jobs:
   build-and-test:
-    name: Build & Test (C + Python + Sanitizers)
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,8 +28,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang ninja-build libgmp-dev libmpfr-dev python3-dev python3-venv
 
-      - name: Check Compiler Version
-        run: clang --version
+      - name: Check Compiler & CPU Architecture
+        run: |
+          uname -m
+          clang --version
 
       - name: Build & Run C Unit Tests
         run: |
@@ -45,9 +55,17 @@ jobs:
           pytest python/tests
 
   benchmarks:
-    name: Benchmarks & Performance Reports
-    runs-on: ubuntu-latest
+    name: Benchmarks (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     needs: [build-and-test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -67,8 +85,8 @@ jobs:
 
       - name: Run C Benchmark Suite (Text & CSV)
         run: |
-          ./build-bench/mantix_bench | tee reports/benchmarks-c.txt
-          ./build-bench/mantix_bench --csv --output reports/benchmarks-c.csv
+          ./build-bench/mantix_bench | tee reports/benchmarks-c-${{ matrix.arch }}.txt
+          ./build-bench/mantix_bench --csv --output reports/benchmarks-c-${{ matrix.arch }}.csv
 
       - name: Setup Python Environment for Benchmarks
         run: |
@@ -81,35 +99,35 @@ jobs:
       - name: Run Python Benchmarks
         run: |
           source .venv/bin/activate
-          python3 python/benchmarks/bench_python.py | tee reports/benchmarks-python.txt
+          python3 python/benchmarks/bench_python.py | tee reports/benchmarks-python-${{ matrix.arch }}.txt
 
       - name: Generate Markdown Benchmark Summary
         run: |
-          cat << 'END_MD' > reports/benchmark-summary.md
-          # 🚀 Mantix Benchmark Report
+          cat << 'END_MD' > reports/benchmark-summary-${{ matrix.arch }}.md
+          # 🚀 Mantix Benchmark Report (${{ matrix.arch }})
 
           ## 1. C Core Benchmarks (Mantix vs GMP vs MPFR)
           ```text
           END_MD
-          cat reports/benchmarks-c.txt >> reports/benchmark-summary.md
-          cat << 'END_MD' >> reports/benchmark-summary.md
+          cat reports/benchmarks-c-${{ matrix.arch }}.txt >> reports/benchmark-summary-${{ matrix.arch }}.md
+          cat << 'END_MD' >> reports/benchmark-summary-${{ matrix.arch }}.md
           ```
 
           ## 2. Python Benchmarks (Mantix vs gmpy2 vs mpmath vs Decimal vs float)
           ```text
           END_MD
-          cat reports/benchmarks-python.txt >> reports/benchmark-summary.md
-          cat << 'END_MD' >> reports/benchmark-summary.md
+          cat reports/benchmarks-python-${{ matrix.arch }}.txt >> reports/benchmark-summary-${{ matrix.arch }}.md
+          cat << 'END_MD' >> reports/benchmark-summary-${{ matrix.arch }}.md
           ```
           END_MD
 
       - name: Publish Summary to GitHub Actions UI
         run: |
-          cat reports/benchmark-summary.md >> $GITHUB_STEP_SUMMARY
+          cat reports/benchmark-summary-${{ matrix.arch }}.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Benchmark Reports Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mantix-benchmark-reports
+          name: mantix-benchmark-reports-${{ matrix.arch }}
           path: reports/
           retention-days: 30
